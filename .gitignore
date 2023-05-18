@@ -1,5 +1,6 @@
-.DS_Store
+*.DS_Store
 .idea
 __pycache__
 lstm-forecasting-master
 *.png
+plotting/*
