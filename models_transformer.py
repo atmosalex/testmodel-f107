@@ -8,6 +8,7 @@ import torch.nn as nn
 import math
 from torch import nn, Tensor
 import torch.nn.functional as F
+target_mode_options = ["shift_input_fwd", "future_sequence"]
 
 class PositionalEncoder(nn.Module):
     """
@@ -22,35 +23,35 @@ class PositionalEncoder(nn.Module):
     """
     def __init__(self,
         dropout: float = 0.1,
-        max_seq_len: int = 5000,
+        seqlen_max: int = 5000,
         d_model: int = 512,
-        batch_first: bool = False
+        batch_first: bool = False,
+        device: str = "cpu"
     ):
         """
         Parameters:
             dropout: the dropout rate
-            max_seq_len: the maximum length of the input sequences
-            d_model: The dimension of the output of sub-layers in the model 
-                     (Vaswani et al, 2017)
+            seqlen_max: the maximum length of the input sequences
+            d_model: The dimension of the output of sub-layers in the model
         """
         super().__init__()
         self.d_model = d_model
         self.dropout = nn.Dropout(p=dropout)
         self.batch_first = batch_first
         self.x_dim = 1 if batch_first else 0
+        self.device = device
 
-        # copy pasted from PyTorch tutorial
-        position = torch.arange(max_seq_len).unsqueeze(1)
+        position = torch.arange(seqlen_max).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(1, max_seq_len, d_model)
+        pe = torch.zeros(1, seqlen_max, d_model, device=self.device)
         pe[0, :, 0::2] = torch.sin(position * div_term)
         pe[0, :, 1::2] = torch.cos(position * div_term)
+        #print(pe.size());sys.exit() # [1, seqlen_max, d_model]
         self.register_buffer('pe', pe)
     def forward(self, x: Tensor) -> Tensor:
         """
         Args:
-            x: Tensor, shape [batch_size, seqlen_enc, dim_val] or 
-               [seqlen_enc, batch_size, dim_val]
+            x: [batch_size, seqlen_enc, dim_val]
         """
         x = x + self.pe[:x.size(self.x_dim)]
         return self.dropout(x)
@@ -71,7 +72,8 @@ class tstransformer(nn.Module):
                  dropout_pos_enc: float = 0.1,
                  #dim_feedforward_encoder: int = 2048,
                  #dim_feedforward_decoder: int = 2048,
-                 device: str = "cpu"
+                 device: str = "cpu",
+                 mode=target_mode_options[0]
                  ):
         """
         Args:
@@ -92,26 +94,36 @@ class tstransformer(nn.Module):
         super().__init__()
         self.n_features = n_features
         self.device = device
-        self.src_mask = generate_square_subsequent_mask(dim1=seqlen_out, dim2=seqlen_enc)
-        self.tgt_mask = generate_square_subsequent_mask(dim1=seqlen_out, dim2=seqlen_out)
+        self.mode = mode
+        self.src_mask = generate_square_subsequent_mask(dim1=seqlen_out, dim2=seqlen_enc).to(self.device)
+        self.tgt_mask = generate_square_subsequent_mask(dim1=seqlen_out, dim2=seqlen_out).to(self.device)
+
+        dim_enc_feedforward = 1024 #2048 #default
 
         # encoder block
         #####################################################
         #linear input layer
         self.encoder_input_layer = nn.Linear(
             in_features=self.n_features,
-            out_features=dim_val
+            out_features=dim_val,
+            device=self.device
         )
         #pe
         self.positional_encoding_layer = PositionalEncoder(
             d_model=dim_val,
             dropout=dropout_pos_enc,
-            max_seq_len=seqlen_enc,
-            batch_first = batch_first
+            seqlen_max=seqlen_enc,
+            batch_first = batch_first,
+            device=self.device
         )
         #
         #create encoder layers:
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model = dim_val, nhead=n_heads, batch_first=batch_first,dropout=dropout_encoder)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model = dim_val,
+                                                         dim_feedforward=dim_enc_feedforward,
+                                                         nhead=n_heads,
+                                                         batch_first=batch_first,
+                                                         dropout=dropout_encoder,
+                                                         device=self.device)
         #stack the encoder layer n times in nn.TransformerDecoder:
         self.encoder = nn.TransformerEncoder(
             encoder_layer=encoder_layer,
@@ -124,21 +136,23 @@ class tstransformer(nn.Module):
         #####################################################
         # linear input layer
         self.decoder_input_layer = nn.Linear(
-            in_features=1,  # the number of features you want to predict. Usually just 1
-            out_features=dim_val
+            in_features=self.n_features,  # the number of features you want to predict. Usually just 1
+            out_features=dim_val,
+            device=self.device
         )
 
         #create decoder layers:
-        decoder_layer = nn.TransformerDecoderLayer(d_model=dim_val, nhead=n_heads, batch_first=batch_first, dropout=dropout_decoder)
+        decoder_layer = nn.TransformerDecoderLayer(d_model=dim_val, nhead=n_heads, batch_first=batch_first, dropout=dropout_decoder,device=self.device)
         self.decoder = nn.TransformerDecoder(
-          decoder_layer=decoder_layer,
-          num_layers=n_decoder_layers,
-          norm=None
+            decoder_layer=decoder_layer,
+            num_layers=n_decoder_layers,
+            norm=None
           )
 
         self.linear_mapping = nn.Linear(
             in_features=dim_val,
-            out_features=self.n_features
+            out_features=self.n_features,
+            device=self.device
         )
         #####################################################
 
@@ -164,21 +178,37 @@ class tstransformer(nn.Module):
         # print("From model.forward(): Size of src as given to forward(): {}".format(src.size()))
         # print("From model.forward(): tgt size = {}".format(tgt.size()))
 
-        # Pass throguh the input layer right before the encoder
-        src = self.encoder_input_layer(src)  # src shape: [batch_size, src length, dim_val] regardless of number of input features
-        # print("From model.forward(): Size of src after input layer: {}".format(src.size()))
+        #change each sequence element to a vector
+        src = self.encoder_input_layer(src)
+        # [batch_size, seqlen_enc, n_features] -> [batch_size, seqlen_enc, dim_val] regardless of number of input features
 
-        # Pass through the positional encoding layer
-        src = self.positional_encoding_layer(src)  # src shape: [batch_size, src length, dim_val] regardless of number of input features
-        # print("From model.forward(): Size of src after pos_enc layer: {}".format(src.size()))
+        #positional encoding layer
+        src = self.positional_encoding_layer(src)
+        #[batch_size, seqlen_enc, dim_val] positionally encoded
 
-        # Pass through all the stacked encoder layers in the encoder
-        # Masking is only needed in the encoder if input sequences are padded
-        # which they are not in this time series use case, because all my
-        # input sequences are naturally of the same length.
-        # (https://github.com/huggingface/transformers/issues/4083)
+        #pass through encoder layers
+        # (self attention --> feed forward) Nx, the vector passed between ('sum' vector) has dimension dim_feedforward
+        #self attention step 1)
+        # multiple input (embedding) by 3 trained matricies -->
+        # "query", a "key", and a "value" projection of each element in the sequence
+        #
+        #self attention step 2)
+        # calculate attention scores for each element against each other element,
+        # derived from the dot product of the first element's query with the other element's key (plus some other manipulation)
+        # multiply the element's value by the attention score to get the 'sum' vector
+        #
+        #self attention multiple heads:
+        # each encoder layer has n attention heads, which each produce their own 'sum' vector
+        # these n vectors must be combined and fed into the same feed forward layer
+        # to do this, they are concatenated then multiplied by a trained weights matrix
+        # this weights matrix has row length dim_val so as to produce a set of vectors with the same dimensions as input embeddings
+        #the feedforwad layer consists of 2 matrix multiplications using the dimension dim_feedforward,
+        # but then also recovers the original input dimensions
+        #see here for detailed dimenions: https://towardsdatascience.com/into-the-transformer-5ad892e0cee
+        # masking is only needed in the encoder if input sequences are padded, but here, input sequences are of the same length
         src = self.encoder(src=src)  # src shape: [batch_size, seqlen_enc, dim_val]
-        # print("From model.forward(): Size of src after encoder: {}".format(src.size()))
+
+
 
         # Pass decoder input through decoder input layer)
         decoder_output = self.decoder_input_layer(tgt)  # src shape: [target sequence length, batch_size, dim_val] regardless of number of input features

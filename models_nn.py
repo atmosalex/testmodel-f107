@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import math
 
-target_mode_options = ["shift_input_fwd", "future_sequence", "future_sequence_single_target"]
+target_mode_options = ["shift_input_fwd", "future_sequence"]#, "future_sequence_single_target"]
 
 class LSTM1_ts(nn.Module): #modified for rolling output
     def __init__(self, n_features, size_hidden, dropout, num_layers = 1, device="cpu", mode=target_mode_options[0], seqlen_future = 1):
@@ -17,14 +17,20 @@ class LSTM1_ts(nn.Module): #modified for rolling output
         self.lstm = nn.LSTM(input_size=self.n_features,
                             hidden_size=self.size_hidden,
                             batch_first=True, #first dimension of input is batch size
-                            num_layers=self.num_layers, dropout=dropout) #not used
+                            num_layers=self.num_layers,
+                            dropout=dropout,
+                            device=self.device) #not used
         self.lstmcell1 = nn.LSTMCell(input_size=self.n_features,
-                            hidden_size=self.size_hidden)
+                            hidden_size=self.size_hidden,
+                            device=self.device)
         self.lstmcell2 = nn.LSTMCell(input_size=self.size_hidden,
-                            hidden_size=self.size_hidden)
+                            hidden_size=self.size_hidden,
+                            device=self.device)
 
 
-        self.linearfinal = nn.Linear(in_features=self.size_hidden, out_features=self.n_features)
+        self.linearfinal = nn.Linear(in_features=self.size_hidden,
+                                     out_features=self.n_features,
+                                     device=self.device)
 
         if mode == target_mode_options[0]:
             self.arrange_output = self.arrange_output_shift_input_fwd
@@ -42,7 +48,7 @@ class LSTM1_ts(nn.Module): #modified for rolling output
         h0 = torch.zeros(self.num_layers, size_batch, self.size_hidden, device=self.device).requires_grad_()
         c0 = torch.zeros(self.num_layers, size_batch, self.size_hidden, device=self.device).requires_grad_()
 
-        outputs = torch.empty((size_batch, self.seqlen_future, self.n_features))
+        outputs = torch.empty((size_batch, self.seqlen_future, self.n_features), device = self.device)
 
         for fh in range(self.seqlen_future):
             input = torch.cat((X[:, fh:, :], outputs[:, :fh, :]), dim=1)

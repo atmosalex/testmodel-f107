@@ -7,12 +7,8 @@ import pandas as pd
 import math
 import datetime
 import sys
-import random
-from pandas.plotting import autocorrelation_plot
-from matplotlib import pyplot as plt
-from sklearn.metrics import mean_squared_error as MSE
-import models_nn as mymodels
-#import models_transformer as mymodels
+#import models_nn as mymodels
+import models_transformer as mymodels
 import loader
 import mldataset
 import plot
@@ -20,19 +16,20 @@ import scaler
 
 
 dir_plots = "plotting"
-#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 device = "cpu"
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print("device:", device)
 torch.manual_seed(99)
 
 #set mode:
 #
-mode = mldataset.target_mode_options[0]
+mode = mldataset.target_mode_options[1] #must be 1 for transformer
 fh_max = 1
+features_use = ["f107", "f30"]
 #
 ##
 
 rawdata = loader.Solardata()
-idxrange_features_use = torch.arange(1)
 
 #print("warning: dataset has been scaled, with scaling factors influenced by testing dataset - this is bad practise")
 print()
@@ -40,7 +37,7 @@ print("dataset is shape", rawdata.data.shape, "(time, features)")
 
 # hyper parameters:
 info_model = {}
-info_model["num_epochs"] = 5; num_epochs = info_model["num_epochs"]
+info_model["num_epochs"] = 300; num_epochs = info_model["num_epochs"]
 info_model["size_batch"] = 20; size_batch = info_model["size_batch"]
 info_model["seqlen"] = 24; seqlen = info_model["seqlen"]
 info_model["learning_rate_start"] = 1e-4; learning_rate = info_model["learning_rate_start"]
@@ -54,7 +51,7 @@ info_model["seqlen_future"] = fh_max; seqlen_future = info_model["seqlen_future"
 print_interval = 1
 
 #create pytorch dataset:
-dataset = mldataset.F107data(rawdata, mode, seqlen=seqlen, seqlen_future = seqlen_future, idxrange_features_use = idxrange_features_use)
+dataset = mldataset.F107data(rawdata, mode, seqlen=seqlen, seqlen_future = seqlen_future, features_use = features_use, device = device)
 
 # the first seqlen elements are not usable, because they don't have the full time history:
 len_usable = len(dataset) - seqlen
@@ -62,15 +59,15 @@ n_train = int(0.8 * (len_usable))
 n_test = len_usable - n_train
 
 # non-randomly split the train and test set:
-train_indicies = range(seqlen, seqlen + n_train)
-test_indicies = range(seqlen + n_train, seqlen + n_train + n_test)
+train_indicies = torch.arange(seqlen, seqlen + n_train, device=device)
+test_indicies = torch.arange(seqlen + n_train, seqlen + n_train + n_test, device=device)
 train_set = torch.utils.data.Subset(dataset, train_indicies)
 test_set = torch.utils.data.Subset(dataset, test_indicies)
 
 #scaler:
 ScaleAppliers = [scaler.ScaleApplierStandard, scaler.ScaleApplierNorm]
 #scap = ScaleAppliers[scaling_method](dataset.data[train_indicies, :], dim_data_timeseq=0, size_X_batch=size_batch, dim_X_batch=0, dim_X_timeseq=1)
-scap = ScaleAppliers[scaling_method](dataset.data[train_indicies, idxrange_features_use], dim_data_timeseq=0, dim_X_batch=0, dim_X_timeseq=1, dim_X_features=2)#, target_range_keep=dataset.target_range_keep)
+scap = ScaleAppliers[scaling_method](dataset.data[train_indicies, :], dim_data_timeseq=0, dim_X_batch=0, dim_X_timeseq=1, dim_X_features=2)#, target_range_keep=dataset.target_range_keep)
 
 #shuffle training data:
 train_loader = DataLoader(train_set, batch_size=size_batch, shuffle=True)
@@ -84,31 +81,36 @@ print("dataset iterations:")
 print("input like ", X.shape)  # batch size, sequence length, n features
 print("target like ", y.shape)  # batch size, n_targets, target sequence length
 print()
-n_features = len(idxrange_features_use)
-n_targets = len(idxrange_features_use)
+n_features = len(dataset.column_names)
+n_targets = n_features
 
 # define the model and learning rate:
-target_names=[dataset.column_names[idxrange_features_use]]
+target_names=dataset.column_names
 print("targets:", target_names)
-#LSTM:
-model = mymodels.LSTM1_ts(n_features, size_hidden=n_hidden, dropout=dropout, num_layers=2, mode=mode, seqlen_future=seqlen_future)
+# #LSTM:
+# model = mymodels.LSTM1_ts(n_features,
+#                           size_hidden=n_hidden,
+#                           dropout=dropout,
+#                           num_layers=2,
+#                           mode=mode,
+#                           seqlen_future=seqlen_future,
+#                           device=device)
 
-# #transformer:
-# dim_val = 512 # This can be any value divisible by n_heads. 512 is used in the original transformer paper.
-# n_heads = 8 # The number of attention heads (aka parallel attention layers). dim_val must be divisible by this number
-# n_decoder_layers = 4 # Number of times the decoder layer is stacked in the decoder
-# n_encoder_layers = 4 # Number of times the encoder layer is stacked in the encoder
-# model = mymodels.tstransformer(n_features=n_features,
-#                                seqlen_enc=seqlen,
-#                                seqlen_dec=seqlen_future, #ny
-#                                seqlen_out=seqlen_future, #ny
-#                                batch_first=True,
-#                                dim_val=dim_val,
-#                                n_decoder_layers=n_decoder_layers,
-#                                n_encoder_layers=n_encoder_layers,
-#                                n_heads=n_heads,
-#                                device=device
-#                                )
+#transformer:
+dim_val = 512 # This can be any value divisible by n_heads. 512 is used in the original transformer paper.
+n_heads = 8 # The number of attention heads (aka parallel attention layers). dim_val must be divisible by this number
+n_decoder_layers = 4 # Number of times the decoder layer is stacked in the decoder
+n_encoder_layers = 4 # Number of times the encoder layer is stacked in the encoder
+model = mymodels.tstransformer(n_features=n_features,
+                               seqlen_enc=seqlen,
+                               seqlen_dec=seqlen_future, #ny
+                               seqlen_out=seqlen_future, #ny
+                               batch_first=True,
+                               dim_val=dim_val,
+                               n_decoder_layers=n_decoder_layers,
+                               n_encoder_layers=n_encoder_layers,
+                               n_heads=n_heads,
+                               device=device,mode=mode)
 
 
 X_scaled, y_scaled = scap(X, y)
@@ -164,7 +166,7 @@ for epoch in range(num_epochs):
         trg_y = y_scaled
         trg = torch.cat((src[:, -1:], trg_y[:, :-1]), dim=1)
 
-        def closure():
+        def closure_LSTM():
             optimizer.zero_grad()
             out = model(src)  # forward
             loss = criterion(out, trg_y)
@@ -172,15 +174,15 @@ for epoch in range(num_epochs):
             loss.backward()
             return loss
 
-        # def closure_transformer():
-        #     optimizer.zero_grad()
-        #     out = model(src, trg, model.src_mask, model.tgt_mask)  # forward
-        #     loss = criterion(out, trg_y)
-        #     # print("loss", loss.item())
-        #     loss.backward()
-        #     return loss
+        def closure_transformer():
+            optimizer.zero_grad()
+            out = model(src, trg, model.src_mask, model.tgt_mask)  # forward
+            loss = criterion(out, trg_y)
+            # print("loss", loss.item())
+            loss.backward()
+            return loss
 
-        # closure = closure_LSTM#_transformer
+        closure = closure_transformer
         optimizer.step(closure)
         continue
 
@@ -218,7 +220,7 @@ def perform_testing(model, info_model, test_loader):
 
 
     # get the epoch range corresponding to contiguous test data:
-    time = test_set.dataset.epoch[test_set.indices]
+    time = test_set.dataset.epoch[test_set.indices.cpu().numpy()]
 
 
     #loop through each feature in the dataset feature array:
@@ -241,10 +243,11 @@ def perform_testing(model, info_model, test_loader):
 
                 forecasted_persistence[:fh_max, batchidxrange] = X[:, -1, target_idx]  # last values from each batch
 
-                X_input, _ = scap(X, y)
+                X_scaled, y_scaled = scap(X, y)
+
                 if mode == mymodels.target_mode_options[0]:
                     observed[batchidxrange] = y[:, -1, target_idx] #1 day ahead (current) value
-
+                    X_input = X_scaled
                     for fh in range(fh_max):
                         y_pred = model(X_input)  # dim: batch size, seq len, n_targets
                         _, y = scap.undo(X_input, y_pred)
@@ -254,9 +257,12 @@ def perform_testing(model, info_model, test_loader):
                         #forecasted_persistence[:fh, batchidxrange] = X[:, -1, target_idx]  # last values from each batch
                 elif mode == mymodels.target_mode_options[1]:
                     observed[batchidxrange] = y[:, 0, target_idx] #1 day ahead (current) value
+                    src = X_scaled
+                    trg_y = y_scaled
+                    trg = torch.cat((src[:, -1:], trg_y[:, :-1]), dim=1)
 
-                    y_pred = model(X_input)
-                    _, y = scap.undo(X_input, y_pred)
+                    out = model(src, trg, model.src_mask, model.tgt_mask)#model(src)
+                    _, y = scap.undo(src, out)
 
                     forecasted[:fh_max, batchidxrange] = y[:, :fh_max, target_idx].T  # first values from each batch
                     #X_input = torch.cat((X_input[:, 1:, :], y_pred[:, 0:1, :]), dim=1)
@@ -270,7 +276,6 @@ def perform_testing(model, info_model, test_loader):
         forecasted_persistence = forecasted_persistence.detach().cpu().numpy()
         observed = observed.detach().cpu().numpy()
 
-        observed = observed
 
         # evaluate scores:
         fh_RMSE = []
