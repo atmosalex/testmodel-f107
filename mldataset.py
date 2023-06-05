@@ -29,7 +29,7 @@ class F107data:  # inherit the torch.utils.data.Dataset class
             #self.arrange_output = self.arrange_output_IMS
             #self.target_range_keep = torch.arange(len(self.column_names))
             #self.n_targets = len(self.column_names)
-        elif target_mode == "DMS":
+        elif target_mode == "DMS" or target_mode == "DMS_fh_max":
             self.mask_of_input_in_output = torch.zeros(seqlen, dtype=torch.bool).to(device)
             # [0, 0, 0, 0, 0, ...]
             #self.arrange_output = self.arrange_output_DMS

@@ -348,7 +348,7 @@ class LSTM1_ts(nn.Module): #modified for rolling output
 
         if target_mode == "IMS":
             self.mask_of_input_in_output = torch.cat((torch.zeros(1, dtype=torch.bool), torch.ones(seqlen-1, dtype=torch.bool)),axis=0).to(device)
-        elif target_mode == "DMS":
+        elif target_mode == "DMS" or target_mode == "DMS_fh_max":
             self.mask_of_input_in_output = torch.zeros(seqlen, dtype=torch.bool).to(device)
 
 

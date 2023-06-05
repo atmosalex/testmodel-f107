@@ -16,7 +16,7 @@ import scaler
 import os
 
 dir_plots = "plotting"
-file_msd = "state"
+file_msd = "state.txt"
 dir_plots = os.path.join(dir_plots)
 if not os.path.isdir(dir_plots):
     try:
@@ -32,12 +32,11 @@ torch.manual_seed(99)
 
 #set mode:
 #
-mode_target_options = ["IMS", "DMS"]
+mode_target_options = ["IMS", "DMS", "DMS_fh_max"]
 mode_target = mode_target_options[1] #must be 1 for transformer
 mode_model_options = ["LSTM", "transformer"]
 mode_model = mode_model_options[1]
 fh_max = 7
-seqlen_future_DMS = 1
 features_use = ["f107", "f30"]
 #
 ##
@@ -60,8 +59,10 @@ info_model["patience"] = 50; patience = info_model["patience"]
 info_model["dropout"] = 0.5; dropout = info_model["dropout"]
 if mode_target == "IMS":
     info_model["seqlen_future"] = 1
-else:
-    info_model["seqlen_future"] = seqlen_future_DMS
+elif mode_target == "DMS":
+    info_model["seqlen_future"] = 1
+elif mode_target == "DMS_fh_max":
+    info_model["seqlen_future"] = fh_max
 seqlen_future = info_model["seqlen_future"]
 
 #epoch interval to print training score:
@@ -112,31 +113,33 @@ n_features = len(dataset.column_names)
 # define the model and learning rate:
 target_names=dataset.column_names
 print("targets:", target_names)
-#LSTM:
-model = mymodels.LSTM1_ts(seqlen,
-                          n_features,
-                          size_hidden=n_hidden,
-                          dropout=dropout,
-                          target_mode=mode_target,
-                          num_layers=2,
-                          seqlen_future=seqlen_future,
-                          device=device)
 
-#transformer:
-dim_val = 256 # This can be any value divisible by n_heads. 512 is used in the original transformer paper.
-n_heads = 8 # The number of attention heads (aka parallel attention layers). dim_val must be divisible by this number
-n_decoder_layers = 1 # Number of times the decoder layer is stacked in the decoder
-n_encoder_layers = 1 # Number of times the encoder layer is stacked in the encoder
-model = mymodels.tstransformer(n_features=n_features,
-                               seqlen_enc=seqlen,
-                               seqlen_dec=seqlen_future, #ny
-                               seqlen_out=seqlen_future, #ny
-                               batch_first=True,
-                               dim_val=dim_val,
-                               n_decoder_layers=n_decoder_layers,
-                               n_encoder_layers=n_encoder_layers,
-                               n_heads=n_heads,
-                               device=device,mode_target=mode_target)
+if mode_model == "LSTM":
+    model = mymodels.LSTM1_ts(seqlen,
+                              n_features,
+                              size_hidden=n_hidden,
+                              dropout=dropout,
+                              target_mode=mode_target,
+                              num_layers=2,
+                              seqlen_future=seqlen_future,
+                              device=device)
+elif mode_model == "transformer":
+    dim_val = 256 # This can be any value divisible by n_heads. 512 is used in the original transformer paper.
+    n_heads = 8 # The number of attention heads (aka parallel attention layers). dim_val must be divisible by this number
+    n_decoder_layers = 1 # Number of times the decoder layer is stacked in the decoder
+    n_encoder_layers = 1 # Number of times the encoder layer is stacked in the encoder
+    model = mymodels.tstransformer(n_features=n_features,
+                                   seqlen_enc=seqlen,
+                                   seqlen_dec=seqlen_future, #ny
+                                   seqlen_out=seqlen_future, #ny
+                                   batch_first=True,
+                                   dim_val=dim_val,
+                                   n_decoder_layers=n_decoder_layers,
+                                   n_encoder_layers=n_encoder_layers,
+                                   n_heads=n_heads,
+                                   device=device,mode_target=mode_target)
+else:
+    print("model choice not implemented");sys.exit(1)
 
 
 X_scaled, y_scaled = scap(X, y)
@@ -216,7 +219,6 @@ for epoch in range(num_epochs):
         else:
             print("error: mode not implemented for testing");
             sys.exit()
-
         continue
 
     loss_avg = model.test_model(test_loader, criterion, scap)
@@ -255,7 +257,6 @@ def perform_testing(model, info_model, test_loader):
     # get the epoch range corresponding to contiguous test data:
     time = test_set.dataset.epoch[test_set.indices.cpu().numpy()]
 
-
     #loop through each feature in the dataset feature array:
     scoresummary = pd.DataFrame()
     scoresummary['fh'] = np.arange(fh_max) + 1
@@ -281,16 +282,43 @@ def perform_testing(model, info_model, test_loader):
                 if mode_target == "IMS":
                     observed[batchidxrange] = y[:, -1, target_idx] #1 day ahead (last item in target)
                     X_input = X_scaled
+
                     for fh in range(fh_max):
+                        # if mode_model == "LSTM":
                         y_pred = model(X_input)  # dim: batch size, seq len, ntargets
+                        # elif mode_model == "transformer":
+                        #     y_pred = model(X_input, X_input[:, -1:], model.src_mask, model.tgt_mask)
+                        # else:
+                        #     print("error: mode not implemented for testing");
+                        #     sys.exit()
+
                         _, y = scap.undo(X_input, y_pred)
 
                         forecasted[fh, batchidxrange] = y[:, -1, target_idx]  # last values from each batch
                         X_input = torch.cat((X_input[:, 1:, :], y_pred[:, -1:, :]), dim=1)
                         #forecasted_persistence[:fh, batchidxrange] = X[:, -1, target_idx]  # last values from each batch
+
                 elif mode_target == "DMS":
                     observed[batchidxrange] = y[:, 0, target_idx] #1 day ahead (first item in target)
                     X_input = X_scaled
+
+                    for fh in range(fh_max):
+                        if mode_model == "LSTM":
+                            y_pred = model(X_input)  # dim: batch size, seq len, ntargets
+                        elif mode_model == "transformer":
+                            y_pred = model(X_input, X_input[:, -1:], model.src_mask, model.tgt_mask)
+                        else:
+                            print("error: mode not implemented for testing");sys.exit()
+
+                        _, y = scap.undo(X_input, y_pred)
+
+                        forecasted[fh, batchidxrange] = y[:, 0, target_idx]  # last values from each batch
+                        X_input = torch.cat((X_input[:, 1:, :], y_pred[:, -1:, :]), dim=1)
+
+                elif mode_target == "DMS_fh_max":
+                    observed[batchidxrange] = y[:, 0, target_idx] #1 day ahead (first item in target)
+                    X_input = X_scaled
+
                     src = X_input
                     trg_y = y_scaled
                     trg = torch.cat((src[:, -1:], trg_y[:, :-1]), dim=1)

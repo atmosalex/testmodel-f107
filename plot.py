@@ -204,7 +204,7 @@ def plot_forecast(dir_plots, time, observed, forecasted, persistence, info_model
         fig, axs = plt.subplots(ntwin, figsize=(8, 1 + 2 * ntwin), sharex=False)
         if ntwin == 1: axs = [axs]
 
-        axs[0].set_title(f"{target_key} {fh + 1} Hour Forecast", fontdict={'fontsize': fontsize + 2})
+        axs[0].set_title(f"{target_key} {fh + 1} Day Forecast", fontdict={'fontsize': fontsize + 2})
 
         # fig.autofmt_xdate() #deletes axis labels on last row
 
@@ -266,7 +266,7 @@ def plot_forecast(dir_plots, time, observed, forecasted, persistence, info_model
                      fontdict={'fontsize': fontsize, 'family': 'monospace'},
                      bbox=dict(facecolor='white', edgecolor='grey', boxstyle='round', alpha=0.6, pad=0.1))
         # print score
-        score = 'error in log10(f)\n' \
+        score = 'error in f\n' \
                 f'RMSE = {fh_RMSE[fh]:.4f}\n' \
                 f'RMSEp= {fh_RMSE_persistence[fh]:.4f}'
         axs[-1].text(0.5, 0.02, score, ha='center', va='bottom', transform=ax.transAxes,
