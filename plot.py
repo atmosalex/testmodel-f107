@@ -7,7 +7,6 @@ import os
 import sys
 import colorsys
 
-
 def get_N_cols(N):
     HSV_tuples = [(x * 1.0 / N, 0.74, 0.7) for x in range(N)]
     RGB_tuples = map(lambda x: colorsys.hsv_to_rgb(*x), HSV_tuples)

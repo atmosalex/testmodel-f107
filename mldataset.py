@@ -2,14 +2,12 @@ import torch
 import numpy as np
 import pandas as pd
 
-target_mode_options = ["shift_input_fwd", "future_sequence"]#, "future_sequence_single_target"]
-
 class F107data:  # inherit the torch.utils.data.Dataset class
     def __init__(self, rawdata, target_mode, seqlen=5, seqlen_future = 1, device="cpu", features_use = None):
         self.target_mode = target_mode
         self.sl = seqlen
-        if target_mode == target_mode_options[0]:
-            seqlen_future = 1
+        # if target_mode == target_mode_options[0]:
+        #     seqlen_future = 1
         self.sl_future = seqlen_future
         self.device = device
 
@@ -25,16 +23,21 @@ class F107data:  # inherit the torch.utils.data.Dataset class
 
 
         #decide whether to shift input forward or get a sequence from the future for output
-        if target_mode == target_mode_options[0]: #"shift_input_fwd"
-            self.arrange_output = self.arrange_output_shift_input_fwd
-            self.target_range_keep = torch.arange(len(self.column_names))
-            self.n_targets = len(self.column_names)
-        elif target_mode == target_mode_options[1]: #"future_sequence"
-            self.arrange_output = self.arrange_output_future_sequence
-            self.target_range_keep = torch.arange(len(self.column_names))
-            self.n_targets = len(self.column_names)
-        # elif target_mode == target_mode_options[2]: #"future_sequence_single_target"
-        #     self.arrange_output = self.arrange_output_future_sequence_single_target
+        if target_mode == "IMS":
+            self.mask_of_input_in_output = torch.cat((torch.zeros(1, dtype=torch.bool), torch.ones(seqlen-1, dtype=torch.bool)),axis=0).to(device) #.repeat(len(self.features_use), 1).T
+            #[0, 1, 1, 1, 1, ...]
+            #self.arrange_output = self.arrange_output_IMS
+            #self.target_range_keep = torch.arange(len(self.column_names))
+            #self.n_targets = len(self.column_names)
+        elif target_mode == "DMS":
+            self.mask_of_input_in_output = torch.zeros(seqlen, dtype=torch.bool).to(device)
+            # [0, 0, 0, 0, 0, ...]
+            #self.arrange_output = self.arrange_output_DMS
+            #self.target_range_keep = torch.arange(len(self.column_names))
+            #self.n_targets = len(self.column_names)
+
+        # elif target_mode == target_mode_options[2]: #"DMS_single_target"
+        #     self.arrange_output = self.arrange_output_DMS_single_target
         #     self.target_range_keep = torch.tensor([idx_of_single_target])
         #     self.n_targets = 1
         #     print(f"idx_target_if_scalar set: this model will only predict {self.column_names[idx_of_single_target]} as a scalar")
@@ -55,14 +58,15 @@ class F107data:  # inherit the torch.utils.data.Dataset class
             len_overshoot = idx+self.sl_future - len(self.data)
             target = torch.cat((self.data[idx:, :], self.data[len(self.data)-1, :] * torch.ones((len_overshoot, len(self.features_use)), device=self.device)))
 
-        return self.arrange_output(inputs, target)
-
-    def arrange_output_shift_input_fwd(self, i, o): #return vector target (sequence at times of input shifted forward by 1)
-        return i, torch.cat((i[1:, :], o), 0)
-    def arrange_output_future_sequence(self, i, o): #return vector target (sequence at times of input shifted forward by 1)
-        return i, o
-    # def arrange_output_future_sequence_single_target(self, i, o): #return scalar target (next target feature in sequence)
-    #     return i, o[:, self.target_range_keep]
+        return inputs, torch.cat((inputs[self.mask_of_input_in_output, :], target), 0)
+    #     return self.arrange_output(inputs, target)
+    #
+    # def arrange_output_IMS(self, i, o): #return vector target (sequence at times of input shifted forward by 1)
+    #     return i, torch.cat((i[1:, :], o), 0)
+    # def arrange_output_DMS(self, i, o): #return vector target (sequence at times of input shifted forward by 1)
+    #     return i, o
+    # # def arrange_output_DMS_single_target(self, i, o): #return scalar target (next target feature in sequence)
+    # #     return i, o[:, self.target_range_keep]
 
     def __len__(self):
         return len(self.data)

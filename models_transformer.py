@@ -8,7 +8,7 @@ import torch.nn as nn
 import math
 from torch import nn, Tensor
 import torch.nn.functional as F
-target_mode_options = ["shift_input_fwd", "future_sequence"]
+target_mode_options = ["IMS", "DMS"]
 
 class PositionalEncoder(nn.Module):
     """
@@ -73,7 +73,7 @@ class tstransformer(nn.Module):
                  #dim_feedforward_encoder: int = 2048,
                  #dim_feedforward_decoder: int = 2048,
                  device: str = "cpu",
-                 mode=target_mode_options[0]
+                 mode_target=target_mode_options[0]
                  ):
         """
         Args:
@@ -94,7 +94,7 @@ class tstransformer(nn.Module):
         super().__init__()
         self.n_features = n_features
         self.device = device
-        self.mode = mode
+        self.mode_target = mode_target
         self.src_mask = generate_square_subsequent_mask(dim1=seqlen_out, dim2=seqlen_enc).to(self.device)
         self.tgt_mask = generate_square_subsequent_mask(dim1=seqlen_out, dim2=seqlen_out).to(self.device)
 
@@ -273,6 +273,33 @@ class tstransformer(nn.Module):
     #     #assert len(trg_y) == target_seq_len, "Length of trg_y does not match target sequence length"
     #     return src, trg, trg_y.squeeze(-1)  # change size from [batch_size, target_seq_len, num_features] to [batch_size, target_seq_len]
 
+    def test_model(self, data_loader, loss_function, scap):
+        num_batches = len(data_loader)
+        total_loss = 0
+
+        self.eval()
+        idx_target_priority = 0
+
+        with torch.no_grad():
+            for X, y in data_loader:
+                X_scaled, y_scaled = scap(X, y)
+                src = X_scaled
+                trg_y = y_scaled
+                trg = torch.cat((src[:, -1:], trg_y[:, :-1]), dim=1)
+
+                # X like [10, 27, 1]
+                out = self(src, trg, self.src_mask, self.tgt_mask)  # forward
+                total_loss += loss_function(out, trg_y).item()
+                # print(y_pred[0, -1, 0], y[0, -1, 0], y[0, -2, 0])
+                # f107_fc = y_pred[:, -1, 0]  # last f10.7 value
+                continue
+                # total_loss += loss_function(f107_1dfc, f107_obs).item()
+
+        avg_loss = total_loss / num_batches
+        #print(f" test loss: {avg_loss}")
+
+        self.train()  # switch back into training mode
+        return avg_loss
 
 def generate_square_subsequent_mask(dim1: int, dim2: int) -> Tensor:
     """
@@ -288,31 +315,4 @@ def generate_square_subsequent_mask(dim1: int, dim2: int) -> Tensor:
     """
     return torch.triu(torch.ones(dim1, dim2) * float('-inf'), diagonal=1)
 
-def test_model(data_loader, model, loss_function, scap):
-    num_batches = len(data_loader)
-    total_loss = 0
-
-    model.eval()
-    idx_target_priority = 0
-
-    with torch.no_grad():
-        for X, y in data_loader:
-            X_scaled, y_scaled = scap(X, y)
-            src = X_scaled
-            trg_y = y_scaled
-            trg = torch.cat((src[:, -1:], trg_y[:, :-1]), dim=1)
-
-            # X like [10, 27, 1]
-            out = model(src, trg, model.src_mask, model.tgt_mask)  # forward
-            total_loss += loss_function(out, trg_y).item()
-            # print(y_pred[0, -1, 0], y[0, -1, 0], y[0, -2, 0])
-            # f107_fc = y_pred[:, -1, 0]  # last f10.7 value
-            continue
-            # total_loss += loss_function(f107_1dfc, f107_obs).item()
-
-    avg_loss = total_loss / num_batches
-    #print(f" test loss: {avg_loss}")
-
-    model.train()  # switch back into training mode
-    return avg_loss
 

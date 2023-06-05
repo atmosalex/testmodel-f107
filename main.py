@@ -7,24 +7,36 @@ import pandas as pd
 import math
 import datetime
 import sys
-#import models_nn as mymodels
-import models_transformer as mymodels
+import models_nn as mymodels
+#import models_transformer as mymodels
 import loader
 import mldataset
 import plot
 import scaler
-
+import os
 
 dir_plots = "plotting"
+dir_plots = os.path.join(dir_plots)
+if not os.path.isdir(dir_plots):
+    try:
+        os.mkdir(dir_plots)
+    except:
+        print(f"could not make directory {dir_plots}")
+        sys.exit()
 device = "cpu"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("device:", device)
 torch.manual_seed(99)
 
+
 #set mode:
 #
-mode = mldataset.target_mode_options[1] #must be 1 for transformer
-fh_max = 1
+mode_target_options = ["IMS", "DMS"]
+mode_target = mode_target_options[1] #must be 1 for transformer
+mode_model_options = ["LSTM", "transformer"]
+mode_model = mode_model_options[1]
+fh_max = 7
+seqlen_future_DMS = 1
 features_use = ["f107", "f30"]
 #
 ##
@@ -37,7 +49,7 @@ print("dataset is shape", rawdata.data.shape, "(time, features)")
 
 # hyper parameters:
 info_model = {}
-info_model["num_epochs"] = 300; num_epochs = info_model["num_epochs"]
+info_model["num_epochs"] = 5; num_epochs = info_model["num_epochs"]
 info_model["size_batch"] = 20; size_batch = info_model["size_batch"]
 info_model["seqlen"] = 24; seqlen = info_model["seqlen"]
 info_model["learning_rate_start"] = 1e-4; learning_rate = info_model["learning_rate_start"]
@@ -45,13 +57,17 @@ info_model["n_hidden"] = 28; n_hidden = info_model["n_hidden"]
 info_model["scaling_method"] = 1; scaling_method = info_model["scaling_method"]
 info_model["patience"] = 50; patience = info_model["patience"]
 info_model["dropout"] = 0.5; dropout = info_model["dropout"]
-info_model["seqlen_future"] = fh_max; seqlen_future = info_model["seqlen_future"]
+if mode_target == "IMS":
+    info_model["seqlen_future"] = 1
+else:
+    info_model["seqlen_future"] = seqlen_future_DMS
+seqlen_future = info_model["seqlen_future"]
 
 #epoch interval to print training score:
 print_interval = 1
 
 #create pytorch dataset:
-dataset = mldataset.F107data(rawdata, mode, seqlen=seqlen, seqlen_future = seqlen_future, features_use = features_use, device = device)
+dataset = mldataset.F107data(rawdata, mode_target, seqlen=seqlen, seqlen_future = seqlen_future, features_use = features_use, device = device)
 
 # the first seqlen elements are not usable, because they don't have the full time history:
 len_usable = len(dataset) - seqlen
@@ -75,32 +91,41 @@ test_loader = DataLoader(test_set, batch_size=size_batch, shuffle=False)
 
 print("warning: test data is being used for validation - this is bad practise")
 print()
+print()
 
 X, y = next(iter(train_loader))
 print("dataset iterations:")
-print("input like ", X.shape)  # batch size, sequence length, n features
-print("target like ", y.shape)  # batch size, n_targets, target sequence length
+print("input shape is ", X.shape)  # batch size, sequence length, n features
+print("input [0, :, 0] is ")
+print("", X[0,:,0])
 print()
+print("target shape is ", y.shape)  # batch size, ntargets, target sequence length
+print("target [0, :, 0] is ")
+print("", y[0,:,0])
+print()
+print()
+
+
 n_features = len(dataset.column_names)
-n_targets = n_features
 
 # define the model and learning rate:
 target_names=dataset.column_names
 print("targets:", target_names)
-# #LSTM:
-# model = mymodels.LSTM1_ts(n_features,
-#                           size_hidden=n_hidden,
-#                           dropout=dropout,
-#                           num_layers=2,
-#                           mode=mode,
-#                           seqlen_future=seqlen_future,
-#                           device=device)
+#LSTM:
+model = mymodels.LSTM1_ts(seqlen,
+                          n_features,
+                          size_hidden=n_hidden,
+                          dropout=dropout,
+                          target_mode=mode_target,
+                          num_layers=2,
+                          seqlen_future=seqlen_future,
+                          device=device)
 
 #transformer:
-dim_val = 512 # This can be any value divisible by n_heads. 512 is used in the original transformer paper.
+dim_val = 256 # This can be any value divisible by n_heads. 512 is used in the original transformer paper.
 n_heads = 8 # The number of attention heads (aka parallel attention layers). dim_val must be divisible by this number
-n_decoder_layers = 4 # Number of times the decoder layer is stacked in the decoder
-n_encoder_layers = 4 # Number of times the encoder layer is stacked in the encoder
+n_decoder_layers = 1 # Number of times the decoder layer is stacked in the decoder
+n_encoder_layers = 1 # Number of times the encoder layer is stacked in the encoder
 model = mymodels.tstransformer(n_features=n_features,
                                seqlen_enc=seqlen,
                                seqlen_dec=seqlen_future, #ny
@@ -110,7 +135,7 @@ model = mymodels.tstransformer(n_features=n_features,
                                n_decoder_layers=n_decoder_layers,
                                n_encoder_layers=n_encoder_layers,
                                n_heads=n_heads,
-                               device=device,mode=mode)
+                               device=device,mode_target=mode_target)
 
 
 X_scaled, y_scaled = scap(X, y)
@@ -182,11 +207,18 @@ for epoch in range(num_epochs):
             loss.backward()
             return loss
 
-        closure = closure_transformer
-        optimizer.step(closure)
+
+        if mode_model == "LSTM":
+            optimizer.step(closure_LSTM)
+        elif mode_model == "transformer":
+            optimizer.step(closure_transformer)
+        else:
+            print("error: mode not implemented for testing");
+            sys.exit()
+
         continue
 
-    loss_avg = mymodels.test_model(test_loader, model, criterion, scap)
+    loss_avg = model.test_model(test_loader, criterion, scap)
     if loss_avg < loss_avg_best:
         epoch_improved = epoch
         loss_avg_best = loss_avg
@@ -245,30 +277,36 @@ def perform_testing(model, info_model, test_loader):
 
                 X_scaled, y_scaled = scap(X, y)
 
-                if mode == mymodels.target_mode_options[0]:
-                    observed[batchidxrange] = y[:, -1, target_idx] #1 day ahead (current) value
+                if mode_target == "IMS":
+                    observed[batchidxrange] = y[:, -1, target_idx] #1 day ahead (last item in target)
                     X_input = X_scaled
                     for fh in range(fh_max):
-                        y_pred = model(X_input)  # dim: batch size, seq len, n_targets
+                        y_pred = model(X_input)  # dim: batch size, seq len, ntargets
                         _, y = scap.undo(X_input, y_pred)
 
                         forecasted[fh, batchidxrange] = y[:, -1, target_idx]  # last values from each batch
                         X_input = torch.cat((X_input[:, 1:, :], y_pred[:, -1:, :]), dim=1)
                         #forecasted_persistence[:fh, batchidxrange] = X[:, -1, target_idx]  # last values from each batch
-                elif mode == mymodels.target_mode_options[1]:
-                    observed[batchidxrange] = y[:, 0, target_idx] #1 day ahead (current) value
-                    src = X_scaled
+                elif mode_target == "DMS":
+                    observed[batchidxrange] = y[:, 0, target_idx] #1 day ahead (first item in target)
+                    X_input = X_scaled
+                    src = X_input
                     trg_y = y_scaled
                     trg = torch.cat((src[:, -1:], trg_y[:, :-1]), dim=1)
 
-                    out = model(src, trg, model.src_mask, model.tgt_mask)#model(src)
+                    if mode_model == "LSTM":
+                        out = model(src)
+                    elif mode_model == "transformer":
+                        out = model(src, trg, model.src_mask, model.tgt_mask)
+                    else:
+                        print("error: mode not implemented for testing"); sys.exit()
+
                     _, y = scap.undo(src, out)
 
                     forecasted[:fh_max, batchidxrange] = y[:, :fh_max, target_idx].T  # first values from each batch
                     #X_input = torch.cat((X_input[:, 1:, :], y_pred[:, 0:1, :]), dim=1)
                 else:
-                    print("error: mode not implemented for testing")
-                    sys.exit()
+                    print("error: mode not implemented for testing"); sys.exit()
 
 
         # convert torch results to numpy on CPU so we can plot:
