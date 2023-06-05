@@ -16,6 +16,7 @@ import scaler
 import os
 
 dir_plots = "plotting"
+file_msd = "state"
 dir_plots = os.path.join(dir_plots)
 if not os.path.isdir(dir_plots):
     try:
@@ -49,7 +50,7 @@ print("dataset is shape", rawdata.data.shape, "(time, features)")
 
 # hyper parameters:
 info_model = {}
-info_model["num_epochs"] = 5; num_epochs = info_model["num_epochs"]
+info_model["num_epochs"] = 500; num_epochs = info_model["num_epochs"]
 info_model["size_batch"] = 20; size_batch = info_model["size_batch"]
 info_model["seqlen"] = 24; seqlen = info_model["seqlen"]
 info_model["learning_rate_start"] = 1e-4; learning_rate = info_model["learning_rate_start"]
@@ -356,3 +357,5 @@ def perform_testing(model, info_model, test_loader):
 scoresummary = perform_testing(model, info_model, test_loader)
 print(f'RMSE:RMSE_p')
 print(scoresummary.to_string(index=False))
+
+torch.save(model.state_dict(), file_msd)
