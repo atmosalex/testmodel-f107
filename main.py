@@ -33,9 +33,9 @@ torch.manual_seed(99)
 #set mode:
 #
 mode_target_options = ["IMS", "DMS", "DMS_fh_max"]
-mode_target = mode_target_options[1] #must be 1 for transformer
+mode_target = mode_target_options[0] #must be 1 for transformer
 mode_model_options = ["LSTM", "transformer"]
-mode_model = mode_model_options[1]
+mode_model = mode_model_options[0]
 fh_max = 7
 features_use = ["f107", "f30"]
 #
@@ -49,7 +49,7 @@ print("dataset is shape", rawdata.data.shape, "(time, features)")
 
 # hyper parameters:
 info_model = {}
-info_model["num_epochs"] = 500; num_epochs = info_model["num_epochs"]
+info_model["num_epochs"] = 400; num_epochs = info_model["num_epochs"]
 info_model["size_batch"] = 20; size_batch = info_model["size_batch"]
 info_model["seqlen"] = 24; seqlen = info_model["seqlen"]
 info_model["learning_rate_start"] = 1e-4; learning_rate = info_model["learning_rate_start"]
@@ -361,12 +361,13 @@ def perform_testing(model, info_model, test_loader):
         fh_RMSE_persistence = np.array(fh_RMSE_persistence)
 
         #add the score ratio to our scoresummary table:
-        scoresummary[target_key] = fh_RMSE/fh_RMSE_persistence
+        scoresummary[target_key] = fh_RMSE
+        scoresummary[target_key+"_p"] = fh_RMSE_persistence
 
         # add to dictionary of model parameters (for plotting):
         info_model['target_key'] = target_key
-        info_model['fh_RMSE'] = fh_RMSE
-        info_model['fh_RMSE_persistence'] = fh_RMSE_persistence
+        info_model['fh_RMSE'] = fh_RMSE# * fh_RMSE
+        info_model['fh_RMSE_persistence'] = fh_RMSE_persistence# * fh_RMSE_persistence
 
         # if logy:
         #     # convert back to non-log space:
@@ -383,7 +384,7 @@ def perform_testing(model, info_model, test_loader):
 
 
 scoresummary = perform_testing(model, info_model, test_loader)
-print(f'RMSE:RMSE_p')
+#print(f'RMSE:RMSE_p')
 print(scoresummary.to_string(index=False))
 
 torch.save(model.state_dict(), file_msd)

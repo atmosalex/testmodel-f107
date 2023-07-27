@@ -4,6 +4,9 @@ import torch.nn as nn
 from statsmodels.tsa.arima.model import ARIMA
 import datetime
 import plot
+import torch
+import random
+
 def experiment_persistence(dataset, data, test_frac=0.2):
     # rescale:
     y = (data.f107 * dataset.f107_s) + dataset.f107_m
@@ -49,8 +52,8 @@ def experiment_ARIMA(data, test_frac=0.2):
     y = data.f107
     loss = nn.MSELoss()
     test_idx_first = int(len(y) * (1 - test_frac))
-    plot.autocorrelation_plot(data.series_daily_f107)
-    plt.show()
+    #plot.autocorrelation_plot(data.series_daily_f107)
+
 
     # model = ARIMA(y[:train_frac_idx], order=(2, 1, 2))
     # model_fit = model.fit()

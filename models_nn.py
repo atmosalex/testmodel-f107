@@ -342,6 +342,9 @@ class LSTM1_ts(nn.Module): #modified for rolling output
                             device=self.device)
 
 
+        self.linearinitial = nn.Linear(in_features=self.n_features,
+                                     out_features=self.size_hidden,
+                                     device=self.device)
         self.linearfinal = nn.Linear(in_features=self.size_hidden,
                                      out_features=self.n_features,
                                      device=self.device)
@@ -376,10 +379,10 @@ class LSTM1_ts(nn.Module): #modified for rolling output
     # def arrange_output_DMS(self, X, outputs):
     #     return outputs
 
-    # def forward_lin(self, X):
-    #     out = self.linearinitial(X)
-    #     output = self.linearfinal(out)
-    #     return output
+    def forward_lin(self, X):
+        out = self.linearinitial(X)
+        output = self.linearfinal(out)
+        return output
     #
     # def forward_lstm1(self, X):
     #     #print(X.shape) #batch, seqlen, features, i.e. correct input dim for LSTM when batch_first=True
